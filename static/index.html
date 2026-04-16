@@ -320,7 +320,8 @@
 
           await startSession(result.data.user);
         } catch (authError) {
-          setError(authError?.message || "Authentication failed.");
+          const authErrorMessage = authError && authError.message ? authError.message : "Authentication failed.";
+          setError(authErrorMessage);
         }
       }
 
@@ -445,7 +446,7 @@
         );
 
         const { data } = await supabase.auth.getUser();
-        if (data?.user) await startSession(data.user);
+        if (data && data.user) await startSession(data.user);
       }
 
       bootstrap();
