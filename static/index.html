@@ -402,7 +402,7 @@
       el("messageInput").addEventListener("keydown", (e) => { if (e.key === "Enter") el("sendBtn").click(); });
       el("passwordInput").addEventListener("keydown", (e) => { if (e.key === "Enter") auth("login"); });
 
-      if ("serviceWorker" in navigator) navigator.serviceWorker.register("/static/service-worker.js");
+      if ("serviceWorker" in navigator) navigator.serviceWorker.register("/static/service-worker.js?v=2");
 
       window.addEventListener("beforeinstallprompt", (event) => {
         event.preventDefault();
