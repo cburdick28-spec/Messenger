@@ -99,7 +99,7 @@
     <script src="/static/supabase-js.js"></script>
     <script src="/static/config.js"></script>
     <script>
-      let supabase = null;
+      let sbClient = null;
       let me = null;
       let contacts = [];
       let groups = [];
@@ -135,11 +135,11 @@
 
       async function ensureProfile(user) {
         const email = (user.email || "").toLowerCase();
-        await supabase.from("profiles").upsert({ id: user.id, email }, { onConflict: "id" });
+        await sbClient.from("profiles").upsert({ id: user.id, email }, { onConflict: "id" });
       }
 
       async function loadContacts() {
-        const { data: rows, error: contactsError } = await supabase
+        const { data: rows, error: contactsError } = await sbClient
           .from("contacts")
           .select("contact_id")
           .eq("owner_id", me.id);
@@ -152,7 +152,7 @@
         }
 
         const contactIds = rows.map((r) => r.contact_id);
-        const { data: profiles, error: profilesError } = await supabase
+        const { data: profiles, error: profilesError } = await sbClient
           .from("profiles")
           .select("id,email")
           .in("id", contactIds);
@@ -168,7 +168,7 @@
       }
 
       async function loadGroups() {
-        const { data: memberships, error: membersError } = await supabase
+        const { data: memberships, error: membersError } = await sbClient
           .from("group_members")
           .select("group_id")
           .eq("user_id", me.id);
@@ -181,7 +181,7 @@
         }
 
         const groupIds = memberships.map((m) => m.group_id);
-        const { data: groupRows, error: groupsError } = await supabase
+        const { data: groupRows, error: groupsError } = await sbClient
           .from("chat_groups")
           .select("id,name")
           .in("id", groupIds)
@@ -194,7 +194,7 @@
 
       async function loadDmHistory(otherUserId, otherEmail) {
         const [a, b] = dmPair(me.id, otherUserId);
-        const { data, error: historyError } = await supabase
+        const { data, error: historyError } = await sbClient
           .from("messages")
           .select("id,kind,dm_a,dm_b,group_id,sender_id,text,created_at")
           .eq("kind", "dm")
@@ -216,7 +216,7 @@
       }
 
       async function loadGroupHistory(group) {
-        const { data, error: historyError } = await supabase
+        const { data, error: historyError } = await sbClient
           .from("messages")
           .select("id,kind,group_id,sender_id,text,created_at")
           .eq("kind", "group")
@@ -228,7 +228,7 @@
         const senderIds = [...new Set((data || []).map((m) => m.sender_id))];
         const senderEmails = {};
         if (senderIds.length) {
-          const { data: profiles } = await supabase.from("profiles").select("id,email").in("id", senderIds);
+          const { data: profiles } = await sbClient.from("profiles").select("id,email").in("id", senderIds);
           (profiles || []).forEach((p) => { senderEmails[p.id] = p.email; });
         }
 
@@ -317,9 +317,9 @@
 
           let result;
           if (action === "register") {
-            result = await withTimeout(supabase.auth.signUp({ email, password }));
+            result = await withTimeout(sbClient.auth.signUp({ email, password }));
           } else {
-            result = await withTimeout(supabase.auth.signInWithPassword({ email, password }));
+            result = await withTimeout(sbClient.auth.signInWithPassword({ email, password }));
           }
           if (result.error) return setError(result.error.message);
           if (!result.data.user) return setError("Could not authenticate. Try again.");
@@ -363,14 +363,14 @@
       el("addContactBtn").onclick = async () => {
         const contactEmail = el("contactInput").value.trim().toLowerCase();
         if (!contactEmail) return;
-        const { data: profile, error: profileError } = await supabase
+        const { data: profile, error: profileError } = await sbClient
           .from("profiles")
           .select("id,email")
           .eq("email", contactEmail)
           .single();
         if (profileError || !profile) return setError("No account found for that email.");
         if (profile.id === me.id) return setError("You cannot add yourself.");
-        const { error: insertError } = await supabase.from("contacts").upsert(
+        const { error: insertError } = await sbClient.from("contacts").upsert(
           { owner_id: me.id, contact_id: profile.id },
           { onConflict: "owner_id,contact_id" }
         );
@@ -382,14 +382,14 @@
       el("createGroupBtn").onclick = async () => {
         const name = el("groupInput").value.trim();
         if (!name) return;
-        const { data: created, error: groupError } = await supabase
+        const { data: created, error: groupError } = await sbClient
           .from("chat_groups")
           .insert({ name, created_by: me.id })
           .select("id,name")
           .single();
         if (groupError) return setError(groupError.message);
 
-        const { error: memberError } = await supabase
+        const { error: memberError } = await sbClient
           .from("group_members")
           .upsert({ group_id: created.id, user_id: me.id }, { onConflict: "group_id,user_id" });
         if (memberError) return setError(memberError.message);
@@ -407,14 +407,14 @@
         } else {
           payload = { kind: "group", group_id: current.group.id, sender_id: me.id, text };
         }
-        const { error: insertError } = await supabase.from("messages").insert(payload);
+        const { error: insertError } = await sbClient.from("messages").insert(payload);
         if (insertError) return setError(insertError.message);
         el("messageInput").value = "";
         await refreshCurrentHistory();
       };
 
       el("logoutBtn").onclick = async () => {
-        await supabase.auth.signOut();
+        await sbClient.auth.signOut();
         if (refreshTimer) clearInterval(refreshTimer);
         refreshTimer = null;
         me = null;
@@ -451,12 +451,12 @@
           setError("Missing Supabase config. Edit /static/config.js with your project URL and anon key.");
           return;
         }
-        supabase = window.supabase.createClient(
+        sbClient = window.supabase.createClient(
           window.MESSENGER_CONFIG.supabaseUrl,
           window.MESSENGER_CONFIG.supabaseAnonKey
         );
 
-        const { data } = await supabase.auth.getUser();
+        const { data } = await sbClient.auth.getUser();
         if (data && data.user) await startSession(data.user);
       }
 
