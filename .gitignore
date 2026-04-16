@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+chat.db
+server.log
+server.err.log
+cloudflared.log
+cloudflared.err.log
