@@ -284,20 +284,30 @@
       }
 
       async function auth(action) {
-        const email = el("emailInput").value.trim().toLowerCase();
-        const password = el("passwordInput").value.trim();
-        if (!email || !password) return setError("Enter email and password.");
-        if (password.length < 6) return setError("Password must be at least 6 characters.");
+        try {
+          const email = el("emailInput").value.trim().toLowerCase();
+          const password = el("passwordInput").value.trim();
+          if (!email || !password) return setError("Enter email and password.");
+          if (password.length < 6) return setError("Password must be at least 6 characters.");
 
-        let result;
-        if (action === "register") {
-          result = await supabase.auth.signUp({ email, password });
-        } else {
-          result = await supabase.auth.signInWithPassword({ email, password });
+          let result;
+          if (action === "register") {
+            result = await supabase.auth.signUp({ email, password });
+          } else {
+            result = await supabase.auth.signInWithPassword({ email, password });
+          }
+          if (result.error) return setError(result.error.message);
+          if (!result.data.user) return setError("Could not authenticate. Try again.");
+
+          // With email confirmation enabled, signUp may return a user but no session.
+          if (!result.data.session) {
+            return setError("Check your email and confirm your account, then log in.");
+          }
+
+          await startSession(result.data.user);
+        } catch (authError) {
+          setError(authError?.message || "Authentication failed.");
         }
-        if (result.error) return setError(result.error.message);
-        if (!result.data.user) return setError("Check your email for a confirmation link, then log in.");
-        await startSession(result.data.user);
       }
 
       window.openDm = async (encodedUserId, encodedEmail) => {
