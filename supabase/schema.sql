@@ -81,13 +81,7 @@ create policy chat_groups_insert_creator on public.chat_groups
 
 drop policy if exists group_members_select_member on public.group_members;
 create policy group_members_select_member on public.group_members
-  for select to authenticated using (
-    user_id = auth.uid()
-    or exists (
-      select 1 from public.group_members gm2
-      where gm2.group_id = group_members.group_id and gm2.user_id = auth.uid()
-    )
-  );
+  for select to authenticated using (user_id = auth.uid());
 
 drop policy if exists group_members_insert_self on public.group_members;
 create policy group_members_insert_self on public.group_members
