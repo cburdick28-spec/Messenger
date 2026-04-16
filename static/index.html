@@ -281,7 +281,7 @@
             await loadContacts();
             await loadGroups();
             await refreshCurrentHistory();
-          } catch {
+          } catch (refreshError) {
             // Keep UI responsive if background refresh fails intermittently.
           }
         }, 3000);
