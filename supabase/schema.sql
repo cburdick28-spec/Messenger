@@ -4,8 +4,14 @@ create extension if not exists pgcrypto;
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text unique not null,
+  display_name text,
   created_at timestamptz not null default now()
 );
+
+alter table public.profiles add column if not exists display_name text;
+update public.profiles
+set display_name = split_part(email, '@', 1)
+where coalesce(trim(display_name), '') = '';
 
 create table if not exists public.contacts (
   owner_id uuid not null references public.profiles(id) on delete cascade,
@@ -86,6 +92,28 @@ create policy group_members_select_member on public.group_members
 drop policy if exists group_members_insert_self on public.group_members;
 create policy group_members_insert_self on public.group_members
   for insert to authenticated with check (user_id = auth.uid());
+
+create or replace function public.can_invite_to_group(target_group_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.group_members gm
+    where gm.group_id = target_group_id
+      and gm.user_id = auth.uid()
+  );
+$$;
+
+grant execute on function public.can_invite_to_group(uuid) to authenticated;
+
+drop policy if exists group_members_insert_by_member on public.group_members;
+create policy group_members_insert_by_member on public.group_members
+  for insert to authenticated
+  with check (public.can_invite_to_group(group_id));
 
 drop policy if exists messages_select_visible on public.messages;
 create policy messages_select_visible on public.messages

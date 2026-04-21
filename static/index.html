@@ -18,8 +18,8 @@
       .chat-head { border-bottom: 1px solid #334155; padding: 14px; font-weight: bold; }
       .messages { flex: 1; overflow-y: auto; padding: 14px; }
       .row { display: flex; gap: 8px; padding: 8px 14px 14px; border-top: 1px solid #334155; }
-      input, button { border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; padding: 10px; }
-      input { width: 100%; }
+      input, button, select { border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; padding: 10px; }
+      input, select { width: 100%; }
       button { cursor: pointer; background: #2563eb; border-color: #2563eb; }
       .item { padding: 8px; border: 1px solid #334155; border-radius: 8px; margin-bottom: 6px; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
       .actions { display: flex; gap: 6px; }
@@ -59,9 +59,15 @@
             <button id="logoutBtn">Logout</button>
           </div>
 
+          <h3>Profile</h3>
+          <div style="display:flex; gap:6px; margin-bottom:8px;">
+            <input id="displayNameInput" placeholder="Your display name" />
+            <button id="saveNameBtn">Save</button>
+          </div>
+
           <h3>Contacts</h3>
           <div style="display:flex; gap:6px; margin-bottom:8px;">
-            <input id="contactInput" placeholder="friend@email.com" />
+            <select id="peopleSelect"></select>
             <button id="addContactBtn">Add</button>
           </div>
           <div id="contactsList"></div>
@@ -70,6 +76,11 @@
           <div style="display:flex; gap:6px; margin-bottom:8px;">
             <input id="groupInput" placeholder="New group name" />
             <button id="createGroupBtn">Create</button>
+          </div>
+          <div style="display:flex; gap:6px; margin-bottom:8px;">
+            <select id="inviteGroupSelect"></select>
+            <select id="inviteContactSelect"></select>
+            <button id="inviteBtn">Invite</button>
           </div>
           <div id="groupsList"></div>
         </aside>
@@ -102,6 +113,7 @@
       let sbClient = null;
       let me = null;
       let contacts = [];
+      let people = [];
       let groups = [];
       let current = null;
       let installPrompt = null;
@@ -114,6 +126,9 @@
       const messages = el("messages");
       const chatTitle = el("chatTitle");
       const error = el("error");
+      const peopleSelect = el("peopleSelect");
+      const inviteGroupSelect = el("inviteGroupSelect");
+      const inviteContactSelect = el("inviteContactSelect");
 
       window.addEventListener("error", (event) => {
         setError(`Script error: ${event.message}`);
@@ -123,6 +138,15 @@
       function dmId(a, b) { return `dm:${[a, b].sort().join(":")}`; }
       function groupId(id) { return `group:${id}`; }
       function esc(text) { return String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"); }
+      function normalizeDisplayName(name, email) {
+        const cleanName = String(name || "").trim();
+        if (cleanName) return cleanName;
+        const localPart = String(email || "").split("@")[0].trim();
+        return localPart || "User";
+      }
+      function personLabel(person) {
+        return `${normalizeDisplayName(person.display_name, person.email)} (${person.email})`;
+      }
 
       function setError(message) {
         error.textContent = message || "";
@@ -135,7 +159,26 @@
 
       async function ensureProfile(user) {
         const email = (user.email || "").toLowerCase();
-        await sbClient.from("profiles").upsert({ id: user.id, email }, { onConflict: "id" });
+        const { error: upsertError } = await sbClient.from("profiles").upsert({ id: user.id, email }, { onConflict: "id" });
+        if (upsertError) throw upsertError;
+
+        const { data: profile, error: profileError } = await sbClient
+          .from("profiles")
+          .select("id,email,display_name")
+          .eq("id", user.id)
+          .single();
+        if (profileError) throw profileError;
+
+        const displayName = normalizeDisplayName(profile.display_name, email);
+        if (displayName !== String(profile.display_name || "").trim()) {
+          const { error: updateError } = await sbClient
+            .from("profiles")
+            .update({ display_name: displayName, email })
+            .eq("id", user.id);
+          if (updateError) throw updateError;
+        }
+
+        return { id: user.id, email, displayName };
       }
 
       async function loadContacts() {
@@ -154,7 +197,7 @@
         const contactIds = rows.map((r) => r.contact_id);
         const { data: profiles, error: profilesError } = await sbClient
           .from("profiles")
-          .select("id,email")
+          .select("id,email,display_name")
           .in("id", contactIds);
         if (profilesError) throw profilesError;
 
@@ -162,9 +205,29 @@
         contacts = rows
           .map((row) => byId.get(row.contact_id))
           .filter(Boolean)
-          .map((p) => ({ id: p.id, email: p.email }))
-          .sort((a, b) => a.email.localeCompare(b.email));
+          .map((p) => ({
+            id: p.id,
+            email: p.email,
+            displayName: normalizeDisplayName(p.display_name, p.email)
+          }))
+          .sort((a, b) =>
+            a.displayName.localeCompare(b.displayName) || a.email.localeCompare(b.email)
+          );
         renderContacts();
+        renderPeopleSelect();
+        renderInviteControls();
+      }
+
+      async function loadPeople() {
+        const { data: rows, error: peopleError } = await sbClient
+          .from("profiles")
+          .select("id,email,display_name")
+          .order("display_name", { ascending: true })
+          .order("email", { ascending: true })
+          .limit(500);
+        if (peopleError) throw peopleError;
+        people = rows || [];
+        renderPeopleSelect();
       }
 
       async function loadGroups() {
@@ -190,9 +253,10 @@
 
         groups = groupRows || [];
         renderGroups();
+        renderInviteControls();
       }
 
-      async function loadDmHistory(otherUserId, otherEmail) {
+      async function loadDmHistory(otherUserId, otherDisplayName) {
         const [a, b] = dmPair(me.id, otherUserId);
         const { data, error: historyError } = await sbClient
           .from("messages")
@@ -205,10 +269,11 @@
         if (historyError) throw historyError;
 
         byConversation.set(
-          dmId(me.email, otherEmail),
+          dmId(me.id, otherUserId),
           (data || []).map((m) => ({
-            conversationId: dmId(me.email, otherEmail),
-            from: m.sender_id === me.id ? me.email : otherEmail,
+            conversationId: dmId(me.id, otherUserId),
+            fromId: m.sender_id,
+            from: m.sender_id === me.id ? me.displayName : otherDisplayName,
             text: m.text,
             timestamp: m.created_at
           }))
@@ -228,14 +293,17 @@
         const senderIds = [...new Set((data || []).map((m) => m.sender_id))];
         const senderEmails = {};
         if (senderIds.length) {
-          const { data: profiles } = await sbClient.from("profiles").select("id,email").in("id", senderIds);
-          (profiles || []).forEach((p) => { senderEmails[p.id] = p.email; });
+          const { data: profiles } = await sbClient.from("profiles").select("id,email,display_name").in("id", senderIds);
+          (profiles || []).forEach((p) => {
+            senderEmails[p.id] = normalizeDisplayName(p.display_name, p.email);
+          });
         }
 
         byConversation.set(
           groupId(group.id),
           (data || []).map((m) => ({
             conversationId: groupId(group.id),
+            fromId: m.sender_id,
             from: senderEmails[m.sender_id] || "Unknown",
             text: m.text,
             timestamp: m.created_at
@@ -246,9 +314,35 @@
       function renderContacts() {
         contactsList.innerHTML = contacts.map((c) => `
           <div class="item">
-            <span>${esc(c.email)}</span>
-            <div class="actions"><button onclick="openDm('${encodeURIComponent(c.id)}','${encodeURIComponent(c.email)}')">Chat</button></div>
+            <div>
+              <div>${esc(c.displayName)}</div>
+              <div class="muted">${esc(c.email)}</div>
+            </div>
+            <div class="actions"><button onclick="openDm('${encodeURIComponent(c.id)}','${encodeURIComponent(c.displayName)}','${encodeURIComponent(c.email)}')">Chat</button></div>
           </div>`).join("") || `<div class="muted">No contacts yet.</div>`;
+      }
+
+      function renderPeopleSelect() {
+        const existing = new Set(contacts.map((c) => c.id));
+        const candidates = people
+          .filter((p) => p.id !== me.id && !existing.has(p.id))
+          .sort((a, b) =>
+            personLabel(a).localeCompare(personLabel(b))
+          );
+        peopleSelect.innerHTML = candidates.map((p) =>
+          `<option value="${esc(p.id)}">${esc(personLabel(p))}</option>`
+        ).join("") || `<option value="">No people available</option>`;
+        el("addContactBtn").disabled = !candidates.length;
+      }
+
+      function renderInviteControls() {
+        inviteGroupSelect.innerHTML = groups.map((g) =>
+          `<option value="${esc(g.id)}">${esc(g.name)}</option>`
+        ).join("") || `<option value="">No groups</option>`;
+        inviteContactSelect.innerHTML = contacts.map((c) =>
+          `<option value="${esc(c.id)}">${esc(c.displayName)} (${esc(c.email)})</option>`
+        ).join("") || `<option value="">No contacts</option>`;
+        el("inviteBtn").disabled = !(groups.length && contacts.length);
       }
 
       function renderGroups() {
@@ -262,7 +356,7 @@
       function renderMessages(conversationId) {
         const list = byConversation.get(conversationId) || [];
         messages.innerHTML = list.map((m) => {
-          const who = m.from === me.email ? `<span class="me">${esc(m.from)}</span>` : esc(m.from);
+          const who = m.fromId === me.id ? `<span class="me">${esc(m.from)}</span>` : esc(m.from);
           return `<div class="msg"><b>${who}</b>: ${esc(m.text)}<div class="muted">${new Date(m.timestamp).toLocaleString()}</div></div>`;
         }).join("");
         messages.scrollTop = messages.scrollHeight;
@@ -271,7 +365,7 @@
       async function refreshCurrentHistory() {
         if (!current) return;
         if (current.kind === "dm") {
-          await loadDmHistory(current.userId, current.email);
+          await loadDmHistory(current.userId, current.displayName);
         } else {
           await loadGroupHistory(current.group);
         }
@@ -279,9 +373,10 @@
       }
 
       async function startSession(user) {
-        me = { id: user.id, email: user.email.toLowerCase() };
-        await ensureProfile(user);
-        el("meLabel").textContent = `You: ${me.email}`;
+        me = await ensureProfile(user);
+        el("displayNameInput").value = me.displayName;
+        el("meLabel").textContent = `You: ${me.displayName} (${me.email})`;
+        await loadPeople();
         await loadContacts();
         await loadGroups();
         setLoggedIn(true);
@@ -291,6 +386,7 @@
           try {
             await loadContacts();
             await loadGroups();
+            await loadPeople();
             await refreshCurrentHistory();
           } catch (refreshError) {
             // Keep UI responsive if background refresh fails intermittently.
@@ -338,12 +434,13 @@
 
       window.__messengerAuth = auth;
 
-      window.openDm = async (encodedUserId, encodedEmail) => {
+      window.openDm = async (encodedUserId, encodedName, encodedEmail) => {
         const userId = decodeURIComponent(encodedUserId);
+        const displayName = decodeURIComponent(encodedName);
         const email = decodeURIComponent(encodedEmail);
-        current = { kind: "dm", userId, email, id: dmId(me.email, email) };
-        chatTitle.textContent = `Direct chat with ${email}`;
-        await loadDmHistory(userId, email);
+        current = { kind: "dm", userId, displayName, email, id: dmId(me.id, userId) };
+        chatTitle.textContent = `Direct chat with ${displayName}`;
+        await loadDmHistory(userId, displayName);
         renderMessages(current.id);
       };
 
@@ -360,22 +457,30 @@
       el("registerBtn").onclick = () => auth("register");
       el("loginBtn").onclick = () => auth("login");
 
-      el("addContactBtn").onclick = async () => {
-        const contactEmail = el("contactInput").value.trim().toLowerCase();
-        if (!contactEmail) return;
-        const { data: profile, error: profileError } = await sbClient
+      el("saveNameBtn").onclick = async () => {
+        const displayName = el("displayNameInput").value.trim();
+        if (!displayName) return setError("Display name is required.");
+        const { error: updateError } = await sbClient
           .from("profiles")
-          .select("id,email")
-          .eq("email", contactEmail)
-          .single();
-        if (profileError || !profile) return setError("No account found for that email.");
-        if (profile.id === me.id) return setError("You cannot add yourself.");
+          .update({ display_name: displayName })
+          .eq("id", me.id);
+        if (updateError) return setError(updateError.message);
+        me.displayName = displayName;
+        el("meLabel").textContent = `You: ${me.displayName} (${me.email})`;
+        setError("Name updated.");
+        await refreshCurrentHistory();
+      };
+
+      el("addContactBtn").onclick = async () => {
+        const contactId = peopleSelect.value;
+        if (!contactId) return;
+        if (contactId === me.id) return setError("You cannot add yourself.");
         const { error: insertError } = await sbClient.from("contacts").upsert(
-          { owner_id: me.id, contact_id: profile.id },
+          { owner_id: me.id, contact_id: contactId },
           { onConflict: "owner_id,contact_id" }
         );
         if (insertError) return setError(insertError.message);
-        el("contactInput").value = "";
+        setError("");
         await loadContacts();
       };
 
@@ -395,6 +500,20 @@
         if (memberError) return setError(memberError.message);
         el("groupInput").value = "";
         await loadGroups();
+      };
+
+      el("inviteBtn").onclick = async () => {
+        const groupIdValue = inviteGroupSelect.value;
+        const contactId = inviteContactSelect.value;
+        if (!groupIdValue || !contactId) return setError("Pick a group and contact to invite.");
+        const group = groups.find((g) => g.id === groupIdValue);
+        const contact = contacts.find((c) => c.id === contactId);
+        if (!group || !contact) return setError("Please refresh and try the invite again.");
+        const { error: inviteError } = await sbClient
+          .from("group_members")
+          .upsert({ group_id: groupIdValue, user_id: contactId }, { onConflict: "group_id,user_id" });
+        if (inviteError) return setError(inviteError.message);
+        setError(`Invited ${contact.displayName} to ${group.name}.`);
       };
 
       el("sendBtn").onclick = async () => {
@@ -420,6 +539,7 @@
         me = null;
         current = null;
         contacts = [];
+        people = [];
         groups = [];
         byConversation.clear();
         messages.innerHTML = "";
