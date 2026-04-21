@@ -11,6 +11,10 @@ Messenger Chat is now configured for **Vercel + Supabase**.
 3. In Supabase Auth:
    - Enable Email sign-in.
    - (Optional) disable email confirmation for faster testing.
+   - If confirmation emails are not arriving, check:
+     - **Auth → URL Configuration** includes your deployed app URL.
+     - **Auth → Email** provider is enabled.
+     - Spam/junk folder and any provider rate limits.
 4. Copy:
    - Project URL
    - Anon public key

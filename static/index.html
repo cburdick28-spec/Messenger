@@ -47,6 +47,8 @@
         </div>
         <div style="height:8px"></div>
         <button id="installBtn" class="hidden" style="width:100%;">Install App</button>
+        <div style="height:8px"></div>
+        <button id="resendVerifyBtn" class="hidden" style="width:100%;">Resend verification email</button>
         <p id="error"></p>
       </div>
     </div>
@@ -118,6 +120,7 @@
       let current = null;
       let installPrompt = null;
       let refreshTimer = null;
+      let pendingVerifyEmail = "";
       const byConversation = new Map();
 
       const el = (id) => document.getElementById(id);
@@ -150,6 +153,19 @@
 
       function setError(message) {
         error.textContent = message || "";
+      }
+
+      function authRedirectUrl() {
+        return `${window.location.origin}/static/index.html`;
+      }
+
+      function setVerificationPending(email) {
+        pendingVerifyEmail = email || "";
+        if (pendingVerifyEmail) {
+          el("resendVerifyBtn").classList.remove("hidden");
+        } else {
+          el("resendVerifyBtn").classList.add("hidden");
+        }
       }
 
       function setLoggedIn(loggedIn) {
@@ -380,6 +396,7 @@
         await loadContacts();
         await loadGroups();
         setLoggedIn(true);
+        setVerificationPending("");
         setError("");
         if (refreshTimer) clearInterval(refreshTimer);
         refreshTimer = setInterval(async () => {
@@ -416,7 +433,7 @@
             result = await withTimeout(sbClient.auth.signUp({
               email,
               password,
-              options: { emailRedirectTo: `${window.location.origin}/static/index.html` }
+              options: { emailRedirectTo: authRedirectUrl() }
             }));
           } else {
             result = await withTimeout(sbClient.auth.signInWithPassword({ email, password }));
@@ -426,12 +443,17 @@
 
           // With email confirmation enabled, signUp may return a user but no session.
           if (!result.data.session) {
-            return setError("Check your email and confirm your account, then log in.");
+            setVerificationPending(email);
+            return setError("Verification email sent. Check inbox/spam, then click Resend verification email if needed.");
           }
 
+          setVerificationPending("");
           await startSession(result.data.user);
         } catch (authError) {
           const authErrorMessage = authError && authError.message ? authError.message : "Authentication failed.";
+          if (String(authErrorMessage).toLowerCase().includes("email not confirmed")) {
+            setVerificationPending(el("emailInput").value.trim().toLowerCase());
+          }
           setError(authErrorMessage);
         }
       }
@@ -460,6 +482,18 @@
 
       el("registerBtn").onclick = () => auth("register");
       el("loginBtn").onclick = () => auth("login");
+      el("resendVerifyBtn").onclick = async () => {
+        const email = (pendingVerifyEmail || el("emailInput").value || "").trim().toLowerCase();
+        if (!email || !email.includes("@")) return setError("Enter a valid email address first.");
+        setError("Resending verification email...");
+        const { error: resendError } = await sbClient.auth.resend({
+          type: "signup",
+          email,
+          options: { emailRedirectTo: authRedirectUrl() }
+        });
+        if (resendError) return setError(resendError.message);
+        setError("Verification email resent. Check inbox and spam.");
+      };
 
       el("saveNameBtn").onclick = async () => {
         const displayName = el("displayNameInput").value.trim();
@@ -549,6 +583,7 @@
         messages.innerHTML = "";
         chatTitle.textContent = "Select a contact or group";
         setLoggedIn(false);
+        setVerificationPending("");
       };
 
       el("messageInput").addEventListener("keydown", (e) => { if (e.key === "Enter") el("sendBtn").click(); });
