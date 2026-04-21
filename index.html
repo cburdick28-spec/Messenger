@@ -3,8 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta http-equiv="refresh" content="0; url=/static/index.html" />
     <title>Messenger Chat</title>
+    <script>
+      (function () {
+        var target = new URL("/static/index.html", window.location.origin);
+        target.search = window.location.search;
+        target.hash = window.location.hash;
+        window.location.replace(target.toString());
+      })();
+    </script>
   </head>
   <body>
     <p>Redirecting to <a href="/static/index.html">Messenger Chat</a>...</p>

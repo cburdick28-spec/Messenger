@@ -413,7 +413,11 @@
 
           let result;
           if (action === "register") {
-            result = await withTimeout(sbClient.auth.signUp({ email, password }));
+            result = await withTimeout(sbClient.auth.signUp({
+              email,
+              password,
+              options: { emailRedirectTo: `${window.location.origin}/static/index.html` }
+            }));
           } else {
             result = await withTimeout(sbClient.auth.signInWithPassword({ email, password }));
           }
