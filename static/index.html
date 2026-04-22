@@ -443,8 +443,23 @@
 
           // With email confirmation enabled, signUp may return a user but no session.
           if (!result.data.session) {
+            const identities = Array.isArray(result.data.user.identities) ? result.data.user.identities : null;
+            const existingAccountLikely = identities !== null && identities.length === 0;
             setVerificationPending(email);
-            return setError("Verification email sent. Check inbox/spam, then click Resend verification email if needed.");
+            if (existingAccountLikely) {
+              return setError("This email is already registered. Use Login, or click Resend verification email if it is still unverified.");
+            }
+            const { error: resendAfterSignupError } = await withTimeout(
+              sbClient.auth.resend({
+                type: "signup",
+                email,
+                options: { emailRedirectTo: authRedirectUrl() }
+              })
+            );
+            if (resendAfterSignupError) {
+              return setError(`Account created, but email delivery failed: ${resendAfterSignupError.message}. Check Supabase Auth Email provider/SMTP settings.`);
+            }
+            return setError("Account created. Verification email sent. Check inbox/spam.");
           }
 
           setVerificationPending("");
@@ -491,7 +506,9 @@
           email,
           options: { emailRedirectTo: authRedirectUrl() }
         });
-        if (resendError) return setError(resendError.message);
+        if (resendError) {
+          return setError(`${resendError.message}. Also verify Supabase Auth Email provider and SMTP are configured.`);
+        }
         setError("Verification email resent. Check inbox and spam.");
       };
 

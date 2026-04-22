@@ -14,6 +14,7 @@ Messenger Chat is now configured for **Vercel + Supabase**.
    - If confirmation emails are not arriving, check:
      - **Auth → URL Configuration** includes your deployed app URL.
      - **Auth → Email** provider is enabled.
+     - For reliable delivery, configure custom SMTP in Supabase Auth Email settings.
      - Spam/junk folder and any provider rate limits.
 4. Copy:
    - Project URL
