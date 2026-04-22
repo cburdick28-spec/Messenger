@@ -121,6 +121,7 @@
       let installPrompt = null;
       let refreshTimer = null;
       let pendingVerifyEmail = "";
+      let hasDisplayNameColumn = true;
       const byConversation = new Map();
 
       const el = (id) => document.getElementById(id);
@@ -155,6 +156,21 @@
         error.textContent = message || "";
       }
 
+      function isDisplayNameMissingError(err) {
+        const text = String((err && err.message) || "").toLowerCase();
+        return text.includes("display_name") && (text.includes("does not exist") || text.includes("column"));
+      }
+
+      async function selectProfiles(applyQuery) {
+        const fields = hasDisplayNameColumn ? "id,email,display_name" : "id,email";
+        let { data, error } = await applyQuery(sbClient.from("profiles").select(fields));
+        if (error && hasDisplayNameColumn && isDisplayNameMissingError(error)) {
+          hasDisplayNameColumn = false;
+          ({ data, error } = await applyQuery(sbClient.from("profiles").select("id,email")));
+        }
+        return { data, error };
+      }
+
       function authRedirectUrl() {
         return `${window.location.origin}/static/index.html`;
       }
@@ -178,20 +194,20 @@
         const { error: upsertError } = await sbClient.from("profiles").upsert({ id: user.id, email }, { onConflict: "id" });
         if (upsertError) throw upsertError;
 
-        const { data: profile, error: profileError } = await sbClient
-          .from("profiles")
-          .select("id,email,display_name")
-          .eq("id", user.id)
-          .single();
+        const { data: profile, error: profileError } = await selectProfiles((query) => query.eq("id", user.id).single());
         if (profileError) throw profileError;
 
         const displayName = normalizeDisplayName(profile.display_name, email);
-        if (displayName !== String(profile.display_name || "").trim()) {
+        if (hasDisplayNameColumn && displayName !== String(profile.display_name || "").trim()) {
           const { error: updateError } = await sbClient
             .from("profiles")
             .update({ display_name: displayName, email })
             .eq("id", user.id);
-          if (updateError) throw updateError;
+          if (updateError && isDisplayNameMissingError(updateError)) {
+            hasDisplayNameColumn = false;
+          } else if (updateError) {
+            throw updateError;
+          }
         }
 
         return { id: user.id, email, displayName };
@@ -211,10 +227,7 @@
         }
 
         const contactIds = rows.map((r) => r.contact_id);
-        const { data: profiles, error: profilesError } = await sbClient
-          .from("profiles")
-          .select("id,email,display_name")
-          .in("id", contactIds);
+        const { data: profiles, error: profilesError } = await selectProfiles((query) => query.in("id", contactIds));
         if (profilesError) throw profilesError;
 
         const byId = new Map((profiles || []).map((p) => [p.id, p]));
@@ -235,12 +248,12 @@
       }
 
       async function loadPeople() {
-        const { data: rows, error: peopleError } = await sbClient
-          .from("profiles")
-          .select("id,email,display_name")
-          .order("display_name", { ascending: true })
-          .order("email", { ascending: true })
-          .limit(500);
+        const { data: rows, error: peopleError } = await selectProfiles((query) => {
+          let q = query;
+          if (hasDisplayNameColumn) q = q.order("display_name", { ascending: true });
+          q = q.order("email", { ascending: true }).limit(500);
+          return q;
+        });
         if (peopleError) throw peopleError;
         people = rows || [];
         renderPeopleSelect();
@@ -309,7 +322,7 @@
         const senderIds = [...new Set((data || []).map((m) => m.sender_id))];
         const senderEmails = {};
         if (senderIds.length) {
-          const { data: profiles } = await sbClient.from("profiles").select("id,email,display_name").in("id", senderIds);
+          const { data: profiles } = await selectProfiles((query) => query.in("id", senderIds));
           (profiles || []).forEach((p) => {
             senderEmails[p.id] = normalizeDisplayName(p.display_name, p.email);
           });
@@ -515,10 +528,17 @@
       el("saveNameBtn").onclick = async () => {
         const displayName = el("displayNameInput").value.trim();
         if (!displayName) return setError("Display name is required.");
+        if (!hasDisplayNameColumn) {
+          return setError("Display names are not enabled in this database yet. Run supabase/schema.sql first.");
+        }
         const { error: updateError } = await sbClient
           .from("profiles")
           .update({ display_name: displayName })
           .eq("id", me.id);
+        if (updateError && isDisplayNameMissingError(updateError)) {
+          hasDisplayNameColumn = false;
+          return setError("Display names are not enabled in this database yet. Run supabase/schema.sql first.");
+        }
         if (updateError) return setError(updateError.message);
         me.displayName = displayName;
         el("meLabel").textContent = `You: ${me.displayName} (${me.email})`;
