@@ -571,7 +571,10 @@
 
         const { error: memberError } = await sbClient
           .from("group_members")
-          .upsert({ group_id: created.id, user_id: me.id }, { onConflict: "group_id,user_id" });
+          .upsert(
+            { group_id: created.id, user_id: me.id },
+            { onConflict: "group_id,user_id", ignoreDuplicates: true }
+          );
         if (memberError) return setError(memberError.message);
         el("groupInput").value = "";
         await loadGroups();
@@ -586,8 +589,17 @@
         if (!group || !contact) return setError("Please refresh and try the invite again.");
         const { error: inviteError } = await sbClient
           .from("group_members")
-          .upsert({ group_id: groupIdValue, user_id: contactId }, { onConflict: "group_id,user_id" });
-        if (inviteError) return setError(inviteError.message);
+          .upsert(
+            { group_id: groupIdValue, user_id: contactId },
+            { onConflict: "group_id,user_id", ignoreDuplicates: true }
+          );
+        if (inviteError) {
+          const inviteErrorText = String(inviteError.message || "").toLowerCase();
+          if (inviteErrorText.includes("row-level security") || inviteErrorText.includes("permission")) {
+            return setError("Invite blocked by database policy. Run the latest supabase/schema.sql migration, then try again.");
+          }
+          return setError(inviteError.message);
+        }
         setError(`Invited ${contact.displayName} to ${group.name}.`);
       };
 
