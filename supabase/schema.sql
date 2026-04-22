@@ -115,6 +115,27 @@ create policy group_members_insert_by_member on public.group_members
   for insert to authenticated
   with check (public.can_invite_to_group(group_id));
 
+create or replace function public.invite_to_group(target_group_id uuid, target_user_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.can_invite_to_group(target_group_id) then
+    return false;
+  end if;
+
+  insert into public.group_members (group_id, user_id)
+  values (target_group_id, target_user_id)
+  on conflict (group_id, user_id) do nothing;
+
+  return true;
+end;
+$$;
+
+grant execute on function public.invite_to_group(uuid, uuid) to authenticated;
+
 drop policy if exists messages_select_visible on public.messages;
 create policy messages_select_visible on public.messages
   for select to authenticated using (

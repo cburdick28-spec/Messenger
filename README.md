@@ -7,7 +7,7 @@ Messenger Chat is now configured for **Vercel + Supabase**.
 1. Create a Supabase project.
 2. In Supabase SQL Editor, run:
    - `supabase/schema.sql`
-   - If the app is already deployed, re-run the updated `supabase/schema.sql` to add `display_name` support and group-invite permissions.
+   - If the app is already deployed, re-run the updated `supabase/schema.sql` to add `display_name` support and the `invite_to_group` RPC/policies.
 3. In Supabase Auth:
    - Enable Email sign-in.
    - (Optional) disable email confirmation for faster testing.

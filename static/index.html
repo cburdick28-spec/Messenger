@@ -591,18 +591,28 @@
         const group = groups.find((g) => g.id === groupIdValue);
         const contact = contacts.find((c) => c.id === contactId);
         if (!group || !contact) return setError("Please refresh and try the invite again.");
-        const { error: inviteError } = await sbClient
-          .from("group_members")
-          .upsert(
-            { group_id: groupIdValue, user_id: contactId },
-            { onConflict: "group_id,user_id", ignoreDuplicates: true }
-          );
-        if (inviteError) {
-          const inviteErrorText = String(inviteError.message || "").toLowerCase();
-          if (inviteErrorText.includes("row-level security") || inviteErrorText.includes("permission")) {
-            return setError("Invite blocked by database policy. Run the latest supabase/schema.sql migration, then try again.");
+        const { data: invitedByRpc, error: inviteRpcError } = await sbClient
+          .rpc("invite_to_group", { target_group_id: groupIdValue, target_user_id: contactId });
+        if (inviteRpcError) {
+          const { error: inviteError } = await sbClient
+            .from("group_members")
+            .upsert(
+              { group_id: groupIdValue, user_id: contactId },
+              { onConflict: "group_id,user_id", ignoreDuplicates: true }
+            );
+          if (inviteError) {
+            const inviteErrorText = String(inviteError.message || "").toLowerCase();
+            if (
+              inviteErrorText.includes("row-level security")
+              || inviteErrorText.includes("permission")
+              || inviteErrorText.includes("function public.invite_to_group")
+            ) {
+              return setError("Invite blocked by database policy. Re-run latest supabase/schema.sql in the Supabase project from static/config.js, then refresh.");
+            }
+            return setError(inviteError.message);
           }
-          return setError(inviteError.message);
+        } else if (invitedByRpc === false) {
+          return setError("You can only invite users to groups you are in.");
         }
         setError(`Invited ${contact.displayName} to ${group.name}.`);
       };
