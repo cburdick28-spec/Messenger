@@ -28,7 +28,7 @@
       .msg { margin-bottom: 10px; background: #1e293b; border: 1px solid #334155; padding: 8px; border-radius: 8px; }
       h3 { margin: 14px 0 8px; }
       .me { color: #86efac; }
-      #error { color: #fca5a5; min-height: 20px; }
+      #error, #appStatus { color: #fca5a5; min-height: 20px; }
       .hidden { display: none; }
     </style>
   </head>
@@ -60,6 +60,7 @@
             <b id="meLabel"></b>
             <button id="logoutBtn">Logout</button>
           </div>
+          <p id="appStatus"></p>
 
           <h3>Profile</h3>
           <div style="display:flex; gap:6px; margin-bottom:8px;">
@@ -130,6 +131,7 @@
       const messages = el("messages");
       const chatTitle = el("chatTitle");
       const error = el("error");
+      const appStatus = el("appStatus");
       const peopleSelect = el("peopleSelect");
       const inviteGroupSelect = el("inviteGroupSelect");
       const inviteContactSelect = el("inviteContactSelect");
@@ -153,7 +155,9 @@
       }
 
       function setError(message) {
-        error.textContent = message || "";
+        const text = message || "";
+        error.textContent = text;
+        if (appStatus) appStatus.textContent = text;
       }
 
       function isDisplayNameMissingError(err) {
