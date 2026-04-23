@@ -66,6 +66,13 @@
             <div style="margin-bottom:8px;">
               <button style="width:100%;" onclick="openAdminPanel()">Open message audit</button>
             </div>
+            <div style="display:flex; gap:6px; margin-bottom:8px;">
+              <select id="banUserSelect"></select>
+            </div>
+            <div style="display:flex; gap:6px; margin-bottom:8px;">
+              <input id="banReasonInput" placeholder="Ban reason (optional)" />
+              <button id="banUserBtn">Ban</button>
+            </div>
           </div>
 
           <h3>Profile</h3>
@@ -143,6 +150,8 @@
       const inviteGroupSelect = el("inviteGroupSelect");
       const inviteContactSelect = el("inviteContactSelect");
       const adminSection = el("adminSection");
+      const banUserSelect = el("banUserSelect");
+      const banReasonInput = el("banReasonInput");
 
       window.addEventListener("error", (event) => {
         setError(`Script error: ${event.message}`);
@@ -279,6 +288,7 @@
         if (peopleError) throw peopleError;
         people = rows || [];
         renderPeopleSelect();
+        renderAdminBanUsers();
       }
 
       async function loadGroups() {
@@ -455,6 +465,17 @@
           `<option value="${esc(c.id)}">${esc(c.displayName)} (${esc(c.email)})</option>`
         ).join("") || `<option value="">No contacts</option>`;
         el("inviteBtn").disabled = !(groups.length && contacts.length);
+      }
+
+      function renderAdminBanUsers() {
+        if (!banUserSelect || !me || me.email !== ADMIN_EMAIL) return;
+        const candidates = people
+          .filter((p) => p.id !== me.id && String(p.email || "").toLowerCase() !== ADMIN_EMAIL)
+          .sort((a, b) => personLabel(a).localeCompare(personLabel(b)));
+        banUserSelect.innerHTML = candidates.map((p) =>
+          `<option value="${esc(p.id)}">${esc(personLabel(p))}</option>`
+        ).join("") || `<option value="">No users available</option>`;
+        el("banUserBtn").disabled = !candidates.length;
       }
 
       function renderGroups() {
@@ -639,6 +660,37 @@
         el("meLabel").textContent = `You: ${me.displayName} (${me.email})`;
         setError("Name updated.");
         await refreshCurrentHistory();
+      };
+
+      el("banUserBtn").onclick = async () => {
+        if (!me || me.email !== ADMIN_EMAIL) return setError("Admin access denied.");
+        const targetUserId = banUserSelect.value;
+        if (!targetUserId) return setError("Pick a user to ban.");
+        const banReason = banReasonInput.value.trim();
+        const target = people.find((p) => p.id === targetUserId);
+        if (!target) return setError("Pick a valid user to ban.");
+
+        const { data: banned, error: banError } = await sbClient.rpc("ban_user", {
+          target_user_id: targetUserId,
+          ban_reason: banReason || null
+        });
+        if (banError) {
+          const banErrorText = String(banError.message || "").toLowerCase();
+          if (banErrorText.includes("function public.ban_user")) {
+            return setError("Ban feature not ready in DB. Re-run latest supabase/schema.sql, then refresh.");
+          }
+          return setError(banError.message);
+        }
+        if (banned === false) return setError("Ban denied (cannot ban this user).");
+
+        banReasonInput.value = "";
+        setError(`Banned ${normalizeDisplayName(target.display_name, target.email)}.`);
+        await loadPeople();
+        await loadContacts();
+        await loadGroups();
+        if (current && current.kind === "admin") {
+          await refreshCurrentHistory();
+        }
       };
 
       el("addContactBtn").onclick = async () => {

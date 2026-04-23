@@ -7,7 +7,7 @@ Messenger Chat is now configured for **Vercel + Supabase**.
 1. Create a Supabase project.
 2. In Supabase SQL Editor, run:
    - `supabase/schema.sql`
-   - If the app is already deployed, re-run the updated `supabase/schema.sql` to add `display_name` support and the `invite_to_group` RPC/policies.
+   - If the app is already deployed, re-run the updated `supabase/schema.sql` to add `display_name` support plus admin moderation RPCs/policies (`invite_to_group`, `ban_user`).
 3. In Supabase Auth:
    - Enable Email sign-in.
    - (Optional) disable email confirmation for faster testing.
@@ -37,7 +37,8 @@ Commit and push.
 
 - The app now shows an **Admin** message-audit panel only for:
   - `cburdick28@brewstermadrid.com`
-- Re-run `supabase/schema.sql` in your Supabase project so admin read policies/functions are applied.
+- Admin panel includes banning users; banned users are blocked from chat reads/writes/group interactions.
+- Re-run `supabase/schema.sql` in your Supabase project so admin moderation policies/functions are applied.
 
 ## 3. Deploy on Vercel
 
