@@ -33,6 +33,12 @@ window.MESSENGER_CONFIG = {
 
 Commit and push.
 
+## Admin moderation access
+
+- The app now shows an **Admin** message-audit panel only for:
+  - `cburdick28@brewstermadrid.com`
+- Re-run `supabase/schema.sql` in your Supabase project so admin read policies/functions are applied.
+
 ## 3. Deploy on Vercel
 
 Deploy this repo on Vercel normally.

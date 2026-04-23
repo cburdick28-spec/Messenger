@@ -61,6 +61,12 @@
             <button id="logoutBtn">Logout</button>
           </div>
           <p id="appStatus"></p>
+          <div id="adminSection" class="hidden">
+            <h3>Admin</h3>
+            <div style="margin-bottom:8px;">
+              <button style="width:100%;" onclick="openAdminPanel()">Open message audit</button>
+            </div>
+          </div>
 
           <h3>Profile</h3>
           <div style="display:flex; gap:6px; margin-bottom:8px;">
@@ -123,6 +129,7 @@
       let refreshTimer = null;
       let pendingVerifyEmail = "";
       let hasDisplayNameColumn = true;
+      const ADMIN_EMAIL = "cburdick28@brewstermadrid.com";
       const byConversation = new Map();
 
       const el = (id) => document.getElementById(id);
@@ -135,6 +142,7 @@
       const peopleSelect = el("peopleSelect");
       const inviteGroupSelect = el("inviteGroupSelect");
       const inviteContactSelect = el("inviteContactSelect");
+      const adminSection = el("adminSection");
 
       window.addEventListener("error", (event) => {
         setError(`Script error: ${event.message}`);
@@ -143,6 +151,7 @@
       function dmPair(idA, idB) { return [idA, idB].sort(); }
       function dmId(a, b) { return `dm:${[a, b].sort().join(":")}`; }
       function groupId(id) { return `group:${id}`; }
+      function adminId() { return "admin:audit"; }
       function esc(text) { return String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"); }
       function normalizeDisplayName(name, email) {
         const cleanName = String(name || "").trim();
@@ -191,6 +200,15 @@
       function setLoggedIn(loggedIn) {
         el("login").style.display = loggedIn ? "none" : "grid";
         el("wrap").style.display = loggedIn ? "block" : "none";
+      }
+
+      function setAdminVisible(visible) {
+        if (!adminSection) return;
+        if (visible) {
+          adminSection.classList.remove("hidden");
+        } else {
+          adminSection.classList.add("hidden");
+        }
       }
 
       async function ensureProfile(user) {
@@ -344,6 +362,67 @@
         );
       }
 
+      async function loadAdminHistory() {
+        const { data, error: historyError } = await sbClient
+          .from("messages")
+          .select("id,kind,dm_a,dm_b,group_id,sender_id,text,created_at")
+          .order("created_at", { ascending: false })
+          .limit(500);
+        if (historyError) throw historyError;
+
+        const uniqueUserIds = [...new Set((data || []).flatMap((m) => [m.sender_id, m.dm_a, m.dm_b]).filter(Boolean))];
+        const usersById = {};
+        if (uniqueUserIds.length) {
+          const { data: profiles, error: profilesError } = await selectProfiles((query) => query.in("id", uniqueUserIds));
+          if (profilesError) throw profilesError;
+          (profiles || []).forEach((p) => {
+            usersById[p.id] = normalizeDisplayName(p.display_name, p.email);
+          });
+        }
+
+        const uniqueGroupIds = [...new Set((data || []).map((m) => m.group_id).filter(Boolean))];
+        const groupsById = {};
+        if (uniqueGroupIds.length) {
+          const { data: groupRows, error: groupsError } = await sbClient
+            .from("chat_groups")
+            .select("id,name")
+            .in("id", uniqueGroupIds);
+          if (groupsError) throw groupsError;
+          (groupRows || []).forEach((g) => { groupsById[g.id] = g.name; });
+        }
+
+        byConversation.set(
+          adminId(),
+          (data || [])
+            .slice()
+            .reverse()
+            .map((m) => {
+              if (m.kind === "group") {
+                const groupName = groupsById[m.group_id] || "Unknown group";
+                return {
+                  conversationId: adminId(),
+                  fromId: m.sender_id,
+                  from: usersById[m.sender_id] || "Unknown",
+                  context: `Group: ${groupName}`,
+                  text: m.text,
+                  timestamp: m.created_at
+                };
+              }
+
+              const dmAName = usersById[m.dm_a] || "Unknown";
+              const dmBName = usersById[m.dm_b] || "Unknown";
+              return {
+                conversationId: adminId(),
+                fromId: m.sender_id,
+                from: usersById[m.sender_id] || "Unknown",
+                context: `DM: ${dmAName} ↔ ${dmBName}`,
+                text: m.text,
+                timestamp: m.created_at
+              };
+            })
+        );
+      }
+
       function renderContacts() {
         contactsList.innerHTML = contacts.map((c) => `
           <div class="item">
@@ -390,7 +469,8 @@
         const list = byConversation.get(conversationId) || [];
         messages.innerHTML = list.map((m) => {
           const who = m.fromId === me.id ? `<span class="me">${esc(m.from)}</span>` : esc(m.from);
-          return `<div class="msg"><b>${who}</b>: ${esc(m.text)}<div class="muted">${new Date(m.timestamp).toLocaleString()}</div></div>`;
+          const context = m.context ? `<div class="muted">${esc(m.context)}</div>` : "";
+          return `<div class="msg"><b>${who}</b>: ${esc(m.text)}${context}<div class="muted">${new Date(m.timestamp).toLocaleString()}</div></div>`;
         }).join("");
         messages.scrollTop = messages.scrollHeight;
       }
@@ -399,6 +479,8 @@
         if (!current) return;
         if (current.kind === "dm") {
           await loadDmHistory(current.userId, current.displayName);
+        } else if (current.kind === "admin") {
+          await loadAdminHistory();
         } else {
           await loadGroupHistory(current.group);
         }
@@ -409,6 +491,7 @@
         me = await ensureProfile(user);
         el("displayNameInput").value = me.displayName;
         el("meLabel").textContent = `You: ${me.displayName} (${me.email})`;
+        setAdminVisible(me.email === ADMIN_EMAIL);
         await loadPeople();
         await loadContacts();
         await loadGroups();
@@ -509,6 +592,14 @@
         current = { kind: "group", group, id: groupId(id) };
         chatTitle.textContent = `Group: ${name}`;
         await loadGroupHistory(group);
+        renderMessages(current.id);
+      };
+
+      window.openAdminPanel = async () => {
+        if (!me || me.email !== ADMIN_EMAIL) return setError("Admin access denied.");
+        current = { kind: "admin", id: adminId() };
+        chatTitle.textContent = "Admin: All Message Audit";
+        await loadAdminHistory();
         renderMessages(current.id);
       };
 
@@ -620,6 +711,7 @@
       el("sendBtn").onclick = async () => {
         const text = el("messageInput").value.trim();
         if (!text || !current) return;
+        if (current.kind === "admin") return setError("Admin audit view is read-only.");
         let payload;
         if (current.kind === "dm") {
           const [a, b] = dmPair(me.id, current.userId);
@@ -642,6 +734,7 @@
         contacts = [];
         people = [];
         groups = [];
+        setAdminVisible(false);
         byConversation.clear();
         messages.innerHTML = "";
         chatTitle.textContent = "Select a contact or group";

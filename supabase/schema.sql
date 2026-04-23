@@ -110,6 +110,23 @@ $$;
 
 grant execute on function public.can_invite_to_group(uuid) to authenticated;
 
+create or replace function public.is_admin_user()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.profiles p
+    where p.id = auth.uid()
+      and lower(p.email) = 'cburdick28@brewstermadrid.com'
+  );
+$$;
+
+grant execute on function public.is_admin_user() to authenticated;
+
 drop policy if exists group_members_insert_by_member on public.group_members;
 create policy group_members_insert_by_member on public.group_members
   for insert to authenticated
@@ -139,6 +156,8 @@ grant execute on function public.invite_to_group(uuid, uuid) to authenticated;
 drop policy if exists messages_select_visible on public.messages;
 create policy messages_select_visible on public.messages
   for select to authenticated using (
+    public.is_admin_user()
+    or
     (kind = 'dm' and auth.uid() in (dm_a, dm_b))
     or
     (kind = 'group' and exists (
