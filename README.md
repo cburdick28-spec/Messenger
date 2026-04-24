@@ -37,7 +37,7 @@ Commit and push.
 
 - The app now shows an **Admin** message-audit panel only for:
   - `cburdick28@brewstermadrid.com`
-- Admin panel includes banning users; banned users are blocked from chat reads/writes/group interactions.
+- Admin panel includes banning users and deleting messages; banned users are blocked from chat reads/writes/group interactions.
 - Re-run `supabase/schema.sql` in your Supabase project so admin moderation policies/functions are applied.
 
 ## 3. Deploy on Vercel

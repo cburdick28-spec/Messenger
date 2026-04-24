@@ -269,3 +269,7 @@ create policy messages_insert_group on public.messages
       where gm.group_id = messages.group_id and gm.user_id = auth.uid()
     )
   );
+
+drop policy if exists messages_delete_admin on public.messages;
+create policy messages_delete_admin on public.messages
+  for delete to authenticated using (public.is_admin_user());

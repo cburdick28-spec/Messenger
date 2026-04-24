@@ -332,6 +332,7 @@
         byConversation.set(
           dmId(me.id, otherUserId),
           (data || []).map((m) => ({
+            id: m.id,
             conversationId: dmId(me.id, otherUserId),
             fromId: m.sender_id,
             from: m.sender_id === me.id ? me.displayName : otherDisplayName,
@@ -363,6 +364,7 @@
         byConversation.set(
           groupId(group.id),
           (data || []).map((m) => ({
+            id: m.id,
             conversationId: groupId(group.id),
             fromId: m.sender_id,
             from: senderEmails[m.sender_id] || "Unknown",
@@ -410,6 +412,7 @@
               if (m.kind === "group") {
                 const groupName = groupsById[m.group_id] || "Unknown group";
                 return {
+                  id: m.id,
                   conversationId: adminId(),
                   fromId: m.sender_id,
                   from: usersById[m.sender_id] || "Unknown",
@@ -422,6 +425,7 @@
               const dmAName = usersById[m.dm_a] || "Unknown";
               const dmBName = usersById[m.dm_b] || "Unknown";
               return {
+                id: m.id,
                 conversationId: adminId(),
                 fromId: m.sender_id,
                 from: usersById[m.sender_id] || "Unknown",
@@ -491,7 +495,10 @@
         messages.innerHTML = list.map((m) => {
           const who = m.fromId === me.id ? `<span class="me">${esc(m.from)}</span>` : esc(m.from);
           const context = m.context ? `<div class="muted">${esc(m.context)}</div>` : "";
-          return `<div class="msg"><b>${who}</b>: ${esc(m.text)}${context}<div class="muted">${new Date(m.timestamp).toLocaleString()}</div></div>`;
+          const deleteBtn = current && current.kind === "admin" && me && me.email === ADMIN_EMAIL && m.id != null
+            ? `<button onclick="deleteMessage('${esc(m.id)}')">Delete</button>`
+            : "";
+          return `<div class="msg"><div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;"><div><b>${who}</b>: ${esc(m.text)}${context}<div class="muted">${new Date(m.timestamp).toLocaleString()}</div></div><div>${deleteBtn}</div></div></div>`;
         }).join("");
         messages.scrollTop = messages.scrollHeight;
       }
@@ -622,6 +629,22 @@
         chatTitle.textContent = "Admin: All Message Audit";
         await loadAdminHistory();
         renderMessages(current.id);
+      };
+
+      window.deleteMessage = async (messageIdRaw) => {
+        if (!me || me.email !== ADMIN_EMAIL) return setError("Admin access denied.");
+        const messageId = Number(messageIdRaw);
+        if (!Number.isFinite(messageId)) return setError("Invalid message id.");
+        const { error: deleteError } = await sbClient.from("messages").delete().eq("id", messageId);
+        if (deleteError) {
+          const deleteErrorText = String(deleteError.message || "").toLowerCase();
+          if (deleteErrorText.includes("row-level security") || deleteErrorText.includes("permission")) {
+            return setError("Delete blocked by database policy. Re-run latest supabase/schema.sql in your Supabase project, then refresh.");
+          }
+          return setError(deleteError.message);
+        }
+        setError("Message deleted.");
+        await refreshCurrentHistory();
       };
 
       el("registerBtn").onclick = () => auth("register");
