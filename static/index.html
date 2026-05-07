@@ -136,6 +136,7 @@
       let refreshTimer = null;
       let pendingVerifyEmail = "";
       let hasDisplayNameColumn = true;
+      let hasReadReceiptColumns = true;
       const ADMIN_EMAIL = "cburdick28@brewstermadrid.com";
       const byConversation = new Map();
 
@@ -181,6 +182,11 @@
       function isDisplayNameMissingError(err) {
         const text = String((err && err.message) || "").toLowerCase();
         return text.includes("display_name") && (text.includes("does not exist") || text.includes("column"));
+      }
+
+      function isReadReceiptMissingError(err) {
+        const text = String((err && err.message) || "").toLowerCase();
+        return text.includes("column") && (text.includes("read_at") || text.includes("status"));
       }
 
       async function selectProfiles(applyQuery) {
@@ -503,6 +509,30 @@
         messages.scrollTop = messages.scrollHeight;
       }
 
+      async function markCurrentConversationRead() {
+        if (!current || current.kind === "admin" || !hasReadReceiptColumns) return;
+        const readAt = new Date().toISOString();
+        let query = sbClient
+          .from("messages")
+          .update({ status: "read", read_at: readAt })
+          .neq("sender_id", me.id)
+          .is("read_at", null);
+
+        if (current.kind === "dm") {
+          const [a, b] = dmPair(me.id, current.userId);
+          query = query.eq("kind", "dm").eq("dm_a", a).eq("dm_b", b);
+        } else {
+          query = query.eq("kind", "group").eq("group_id", current.group.id);
+        }
+
+        const { error: readError } = await query;
+        if (readError && isReadReceiptMissingError(readError)) {
+          hasReadReceiptColumns = false;
+          return;
+        }
+        if (readError) throw readError;
+      }
+
       async function refreshCurrentHistory() {
         if (!current) return;
         if (current.kind === "dm") {
@@ -513,6 +543,7 @@
           await loadGroupHistory(current.group);
         }
         renderMessages(current.id);
+        await markCurrentConversationRead();
       }
 
       async function startSession(user) {
@@ -611,6 +642,7 @@
         chatTitle.textContent = `Direct chat with ${displayName}`;
         await loadDmHistory(userId, displayName);
         renderMessages(current.id);
+        await markCurrentConversationRead();
       };
 
       window.openGroup = async (encodedGroupId, encodedName) => {
@@ -621,6 +653,7 @@
         chatTitle.textContent = `Group: ${name}`;
         await loadGroupHistory(group);
         renderMessages(current.id);
+        await markCurrentConversationRead();
       };
 
       window.openAdminPanel = async () => {
